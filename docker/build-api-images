@@ -9,7 +9,7 @@ cuda_version=${3:-12.4}
 current_api_version=$(cat ../package.json | jq -r '.version')
 api_version=${4:-$current_api_version}
 
-bases=("runtime" "devel")
+bases=("devel" "runtime")
 
 for base in "${bases[@]}"; do
   docker build -t ghcr.io/saladtechnologies/comfyui-api:comfy$comfy_version-api$api_version-torch$torch_version-cuda$cuda_version-$base \
@@ -25,9 +25,9 @@ for base in "${bases[@]}"; do
   if [ $base == "runtime" ]; then
     docker tag ghcr.io/saladtechnologies/comfyui-api:comfy$comfy_version-api$api_version-torch$torch_version-cuda$cuda_version-runtime ghcr.io/saladtechnologies/comfyui-api:latest
     docker push ghcr.io/saladtechnologies/comfyui-api:latest
-    docker image rm ghcr.io/saladtechnologies/comfyui-api:latest
+    # docker image rm ghcr.io/saladtechnologies/comfyui-api:latest
   fi
 
    # Remove the image to make space for the next one. Github actions runners don't get much storage.
-  docker image rm ghcr.io/saladtechnologies/comfyui-api:comfy$comfy_version-api$api_version-torch$torch_version-cuda$cuda_version-$base
+  # docker image rm ghcr.io/saladtechnologies/comfyui-api:comfy$comfy_version-api$api_version-torch$torch_version-cuda$cuda_version-$base
 done
