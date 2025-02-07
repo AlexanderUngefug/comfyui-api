@@ -29,4 +29,7 @@ services:
             - driver: nvidia
               capabilities: [ gpu ]
               count: all
-
+  redis:
+    image: redis:7.4-bookworm
+    ports:
+      - "6379:6379"

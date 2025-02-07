@@ -11,7 +11,6 @@ import fsPromises from "fs/promises";
 import path from "path";
 import config from "./config";
 import {
-  processImage,
   zodToMarkdownTable,
   convertImageBuffer,
   getConfiguredWebhookHandlers,
@@ -24,6 +23,7 @@ import {
   shutdownComfyUI,
   runPromptAndGetOutputs,
   connectToComfyUIWebsocketStream,
+  validateAndPreProcessPrompt,
 } from "./comfy";
 import {
   PromptRequestSchema,
@@ -203,94 +203,12 @@ server.after(() => {
     async (request, reply) => {
       let { prompt, id, webhook, convert_output } = request.body;
 
-      /**
-       * Here we go through all the nodes in the prompt to validate it,
-       * and also to do some pre-processing.
-       */
-      let hasSaveImage = false;
-      const loadImageNodes = new Set<string>(["LoadImage"]);
-      const loadDirectoryOfImagesNodes = new Set<string>(["VHS_LoadImages"]);
-      for (const nodeId in prompt) {
-        const node = prompt[nodeId];
-        if (
-          node.inputs.filename_prefix &&
-          typeof node.inputs.filename_prefix === "string"
-        ) {
-          /**
-           * If the node is for saving files, we want to set the filename_prefix
-           * to the id of the prompt. This ensures no collisions between prompts
-           * from different users.
-           */
-          node.inputs.filename_prefix = id;
-          if (
-            typeof node.inputs.save_output !== "undefined" &&
-            !node.inputs.save_output
-          ) {
-            continue;
-          }
-          hasSaveImage = true;
-        } else if (
-          loadImageNodes.has(node.class_type) &&
-          typeof node.inputs.image === "string"
-        ) {
-          /**
-           * If the node is for loading an image, the user will have provided
-           * the image as base64 encoded data, or as a url. we need to download
-           * the image if it's a url, and save it to a local file.
-           */
-          const imageInput = node.inputs.image;
-          try {
-            node.inputs.image = await processImage(imageInput, app.log);
-          } catch (e: any) {
-            return reply.code(400).send({
-              error: e.message,
-              location: `prompt.${nodeId}.inputs.image`,
-            });
-          }
-        } else if (
-          loadDirectoryOfImagesNodes.has(node.class_type) &&
-          Array.isArray(node.inputs.directory) &&
-          node.inputs.directory.every((x: any) => typeof x === "string")
-        ) {
-          /**
-           * If the node is for loading a directory of images, the user will have
-           * provided the local directory as a string or an array of strings. If it's an
-           * array, we need to download each image to a local file, and update the input
-           * to be the local directory.
-           */
-          try {
-            /**
-             * We need to download each image to a local file.
-             */
-            app.log.debug(
-              `Downloading images to local directory for node ${nodeId}`
-            );
-            const processPromises: Promise<string>[] = [];
-            for (const b64 of node.inputs.directory) {
-              processPromises.push(processImage(b64, app.log, id));
-            }
-            await Promise.all(processPromises);
-            node.inputs.directory = id;
-            app.log.debug(`Saved images to local directory for node ${nodeId}`);
-          } catch (e: any) {
-            return reply.code(400).send({
-              error: e.message,
-              location: `prompt.${nodeId}.inputs.directory`,
-              message: "Failed to download images to local directory",
-            });
-          }
-        }
-      }
-
-      /**
-       * If the prompt has no outputs, there's no point in running it.
-       */
-      if (!hasSaveImage) {
-        return reply.code(400).send({
-          error:
-            'Prompt must contain a node with a "filename_prefix" input, such as "SaveImage"',
-          location: "prompt",
-        });
+      try {
+        prompt = await validateAndPreProcessPrompt(id, prompt, app.log);
+      } catch (e: any) {
+        return reply
+          .code(e.code)
+          .send({ error: e.message, location: e.location });
       }
 
       if (webhook) {

@@ -130,6 +130,17 @@ export const PromptRequestSchema = z.object({
 
 export type PromptRequest = z.infer<typeof PromptRequestSchema>;
 
+export const RedisPromptRequestSchema = z.object({
+  prompt: z.record(ComfyNodeSchema),
+  convert_output: OutputConversionOptionsSchema.optional(),
+});
+
+export type RedisPromptRequest = z.infer<typeof RedisPromptRequestSchema>;
+
+export function isRedisPromptRequest(obj: any): obj is RedisPromptRequest {
+  return RedisPromptRequestSchema.safeParse(obj).success;
+}
+
 export const PromptResponseSchema = z.object({
   id: z.string(),
   prompt: z.record(ComfyNodeSchema),
@@ -179,7 +190,22 @@ export const WorkflowRequestSchema = z.object({
   convert_output: OutputConversionOptionsSchema.optional(),
 });
 
+export const RedisWorkflowRequestSchema = z.object({
+  input: z.record(z.any()),
+  convert_output: OutputConversionOptionsSchema.optional(),
+});
+
+export type RedisWorkflowRequest = z.infer<typeof RedisWorkflowRequestSchema>;
+
+export function isRedisWorkflowRequest(obj: any): obj is RedisWorkflowRequest {
+  return RedisWorkflowRequestSchema.safeParse(obj).success;
+}
+
 export type WorkflowRequest = z.infer<typeof WorkflowRequestSchema>;
+
+export function isWorkflowRequest(obj: any): obj is WorkflowRequest {
+  return WorkflowRequestSchema.safeParse(obj).success;
+}
 
 export const WorkflowResponseSchema = z.object({
   id: z.string(),

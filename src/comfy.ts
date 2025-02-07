@@ -1,4 +1,4 @@
-import { sleep } from "./utils";
+import { processImage, sleep } from "./utils";
 import config from "./config";
 import { CommandExecutor } from "./commands";
 import { FastifyBaseLogger } from "fastify";
@@ -439,4 +439,104 @@ export function connectToComfyUIWebsocketStream(
       log.info("Disconnected from Comfy UI websocket");
     });
   });
+}
+
+export class PromptValidationError extends Error {
+  code: number;
+  location: string;
+  constructor(message: string, location: string) {
+    super(message);
+    this.name = "PromptValidationError";
+    this.code = 400;
+    this.location = location;
+
+    Object.setPrototypeOf(this, PromptValidationError.prototype);
+  }
+}
+
+export async function validateAndPreProcessPrompt(
+  id: string,
+  prompt: ComfyPrompt,
+  log: FastifyBaseLogger
+): Promise<ComfyPrompt> {
+  let hasOutputs = false;
+  const loadImageNodes = new Set<string>(["LoadImage"]);
+  const loadDirectoryOfImagesNodes = new Set<string>(["VHS_LoadImages"]);
+  for (const nodeId in prompt) {
+    const node = prompt[nodeId];
+    if (
+      node.inputs.filename_prefix &&
+      typeof node.inputs.filename_prefix === "string"
+    ) {
+      /**
+       * If the node is for saving files, we want to set the filename_prefix
+       * to the id of the prompt. This ensures no collisions between prompts
+       * from different users.
+       */
+      node.inputs.filename_prefix = id;
+      if (
+        typeof node.inputs.save_output !== "undefined" &&
+        !node.inputs.save_output
+      ) {
+        continue;
+      }
+      hasOutputs = true;
+    } else if (
+      loadImageNodes.has(node.class_type) &&
+      typeof node.inputs.image === "string"
+    ) {
+      /**
+       * If the node is for loading an image, the user will have provided
+       * the image as base64 encoded data, or as a url. we need to download
+       * the image if it's a url, and save it to a local file.
+       */
+      const imageInput = node.inputs.image;
+      try {
+        node.inputs.image = await processImage(imageInput, log);
+      } catch (e: any) {
+        throw new PromptValidationError(
+          e.message,
+          `prompt.${nodeId}.inputs.image`
+        );
+      }
+    } else if (
+      loadDirectoryOfImagesNodes.has(node.class_type) &&
+      Array.isArray(node.inputs.directory) &&
+      node.inputs.directory.every((x: any) => typeof x === "string")
+    ) {
+      /**
+       * If the node is for loading a directory of images, the user will have
+       * provided the local directory as a string or an array of strings. If it's an
+       * array, we need to download each image to a local file, and update the input
+       * to be the local directory.
+       */
+      try {
+        /**
+         * We need to download each image to a local file.
+         */
+        log.debug(`Downloading images to local directory for node ${nodeId}`);
+        const processPromises: Promise<string>[] = [];
+        for (const b64 of node.inputs.directory) {
+          processPromises.push(processImage(b64, log, id));
+        }
+        await Promise.all(processPromises);
+        node.inputs.directory = id;
+        log.debug(`Saved images to local directory for node ${nodeId}`);
+      } catch (e: any) {
+        throw new PromptValidationError(
+          `Failed to download images to local directory: ${e.message}`,
+          `prompt.${nodeId}.inputs.directory`
+        );
+      }
+    }
+  }
+
+  if (!hasOutputs) {
+    throw new PromptValidationError(
+      "Prompt does not contain any nodes that save outputs",
+      "prompt"
+    );
+  }
+
+  return prompt;
 }
